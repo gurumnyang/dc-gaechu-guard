@@ -17,12 +17,14 @@ module.exports = {
   crawlDelayMs: parseInt(process.env.CRAWL_DELAY_MS || '100', 10),
 
   // 이상 감지 설정
-  zScoreThreshold: parseFloat(process.env.Z_SCORE_THRESHOLD || '3.0'),
-  minRecChange: parseInt(process.env.MIN_REC_CHANGE || '5', 10),
+  zScoreThreshold: parseFloat(process.env.Z_SCORE_THRESHOLD || '0.5'),
+  minRecChange: parseInt(process.env.MIN_REC_CHANGE || '3', 10),
   shortWindowMin: parseInt(process.env.SHORT_WINDOW_MIN || '10', 10),
   longWindowMin: parseInt(process.env.LONG_WINDOW_MIN || '60', 10),
   slopeRatioThresh: parseFloat(process.env.SLOPE_RATIO_THRESH || '4.0'),
   slopeDeltaThresh: parseFloat(process.env.SLOPE_DELTA_THRESH || '0.4'),
+  // 버스트 감지 설정: 지정된 짧은 윈도우 내 추천수 증가량 임계값
+  burstThreshold: parseInt(process.env.BURST_THRESHOLD || '5', 10),
 
   // API 설정
   apiPort: parseInt(process.env.API_PORT || '3000', 10),

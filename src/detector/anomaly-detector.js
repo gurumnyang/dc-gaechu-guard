@@ -105,69 +105,37 @@ async function detectAnomalies(snapshot) {
     
     if (timeDiffMin <= 0) return null; // 시간차가 없음
     
-    // 분당 추천수 변화량
+    // 분당 추천수 변화량 (이전 로직 유지)
     const recChangePerMin = recChange / timeDiffMin;
     
-    // 같은 갤러리 최근 게시물들의 기울기 수집 (장기 구간으로 변경)
-    const recentSnapshots = await Snapshot.find({
+    // 버스트 감지: shortWindowMin 이내 추천수 증가량이 burstThreshold 이상인 경우 이상치로 판정
+    const windowStart = new Date(new Date(snapshot.collectedAt).getTime() - config.shortWindowMin * 60 * 1000);
+    const windowSnapshots = await Snapshot.find({
+      postNo: snapshot.postNo,
       galleryId: snapshot.galleryId,
-      collectedAt: {
-        $gte: new Date(Date.now() - config.longWindowMin * 60 * 1000) // 최근 longWindowMin 분 데이터
+      collectedAt: { $gte: windowStart }
+    }).sort({ collectedAt: 1 }).lean();
+    if (windowSnapshots.length >= 2) {
+      const burstCount = snapshot.recommend - windowSnapshots[0].recommend;
+      if (burstCount >= config.burstThreshold) {
+        console.log(`🚀 버스트 감지: ${snapshot.postNo} (증가량: ${burstCount}개 in ${config.shortWindowMin}분)`);
+        const anomaly = await Anomaly.create({
+          postNo: snapshot.postNo,
+          galleryId: snapshot.galleryId,
+          detectedAt: new Date(),
+          startedAt: windowSnapshots[0].collectedAt,
+          statistics: {
+            burstCount,
+            burstWindowMin: config.shortWindowMin,
+            beforeRecommend: windowSnapshots[0].recommend,
+            afterRecommend: snapshot.recommend
+          }
+        });
+        return anomaly;
       }
-    }).sort({ collectedAt: -1 }).limit(200);
-    
-    // 비교 모집단 구성
-    const populationSlopes = [];
-    const recentPostNos = [...new Set(recentSnapshots.map(s => s.postNo))]; // 중복 제거
-    
-    for (const pNo of recentPostNos) {
-      const slopes = await calculateSlopes(pNo, snapshot.galleryId);
-      populationSlopes.push(...slopes.filter(s => s > 0)); // 양수 기울기만 포함
     }
-    
-    // short/long slope 계산
-    const shortSlopes = await calculateSlopes(snapshot.postNo, snapshot.galleryId, config.shortWindowMin);
-    const longSlopes = await calculateSlopes(snapshot.postNo, snapshot.galleryId, config.longWindowMin);
-    const shortSlope = shortSlopes[0] || 0;
-    const longSlope = longSlopes.length ? (longSlopes.reduce((a,b)=>a+b,0)/longSlopes.length) : 0;
-    const ratio = longSlope > 0 ? shortSlope / longSlope : Infinity;
-    const deltaSlope = shortSlope - longSlope;
-
-    // Z-Score 계산
-    const zScore = calculateZScore(recChangePerMin, populationSlopes);
-    
-    // 다중 조건 평가 (Z-Score 절댓값 사용)
-    const isSpike =
-      (ratio >= config.slopeRatioThresh && deltaSlope > 0) ||
-      (deltaSlope >= config.slopeDeltaThresh) ||
-      (Math.abs(zScore) >= config.zScoreThreshold);
-    
-    // 이상치 감지
-    if (isSpike) {
-      console.log(`⚠️ 이상치 감지: ${snapshot.postNo} (Z-Score: ${zScore.toFixed(2)}, 단기/장기 비율: ${ratio.toFixed(2)}, 델타: ${deltaSlope.toFixed(2)})`);
-      
-      // 이상치 레코드 생성 - 새로운 지표 포함
-      const anomaly = await Anomaly.create({
-        postNo: snapshot.postNo,
-        galleryId: snapshot.galleryId,
-        detectedAt: new Date(),
-        startedAt: prevSnapshot.collectedAt,
-        statistics: {
-          zScore,
-          recChangePerMin,
-          shortSlope,
-          longSlope,
-          slopeRatio: ratio,
-          slopeDelta: deltaSlope,
-          beforeRecommend: prevSnapshot.recommend,
-          afterRecommend: snapshot.recommend
-        }
-      });
-      
-      return anomaly;
-    }
-    
-    return null; // 이상치 아님
+    // 버스트 감지 조건 미충족 시 이상치 아님
+    return null;
   } catch (err) {
     console.error(`❌ 이상치 감지 오류 (${snapshot.postNo}):`, err.message);
     return null;

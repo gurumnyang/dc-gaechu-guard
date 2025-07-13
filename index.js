@@ -9,6 +9,7 @@ const { crawlGallery } = require('./src/crawler/gallery-crawler');
 const { detectAnomalies } = require('./src/detector/anomaly-detector');
 const { startServer } = require('./src/api/server');
 const Post = require('./src/models/post.model');
+const Snapshot = require('./src/models/snapshot.model');
 
 
 // 메인 크롤링 함수
@@ -62,6 +63,8 @@ async function crawlAllGalleries() {
   
   console.log('✅ 모든 갤러리 크롤링 완료\n');
 }
+
+
 
 // 메인 함수
 async function main() {

@@ -8,6 +8,7 @@ const Anomaly = require('../models/anomaly.model');
 const Snapshot = require('../models/snapshot.model');
 const config = require('../config/config');
 const { calculateSlopes, calculateZScore } = require('../detector/anomaly-detector');
+const { revalidateAllSnapshots } = require('../detector/validator');
 
 // 통계 데이터 API
 router.get('/api/stats', async (req, res) => {
@@ -289,14 +290,21 @@ router.get('/debug/api/posts', async (req, res) => {
           // Z-Score 계산
           const zScore = slopes.length > 0 ? calculateZScore(slopes[0], slopes) : 0;
           
-          // 이상치 감지 로직을 디버그 뷰에도 적용
-          const isSpike = 
-            (ratio >= config.slopeRatioThresh && deltaSlope > 0) ||
-            (deltaSlope >= config.slopeDeltaThresh) ||
-            (Math.abs(zScore) >= config.zScoreThreshold);
+          // 버스트 감지 로직 (새로운 이상치 감지 방식)
+          // 최근 shortWindowMin 이내의 스냅샷 가져오기
+          const windowStart = new Date(new Date(latestSnapshot.collectedAt).getTime() - config.shortWindowMin * 60 * 1000);
+          const windowSnapshots = snapshots.filter(s => new Date(s.collectedAt) >= windowStart);
           
-          // 이상치 감지 시 추천수 조건 검사
-          const wouldBeDetected = isSpike && recChange > config.minRecChange;
+          // 버스트 계산
+          let burstCount = 0;
+          if (windowSnapshots.length >= 2) {
+            const oldestSnapshot = windowSnapshots[windowSnapshots.length - 1];
+            burstCount = latestSnapshot.recommend - oldestSnapshot.recommend;
+          }
+          
+          // 이상치 감지
+          const isBurst = burstCount >= config.burstThreshold;
+          const wouldBeDetected = isBurst;
           
           // 데이터 추가
           debugData.push({
@@ -311,9 +319,11 @@ router.get('/debug/api/posts', async (req, res) => {
             slopeRatio: parseFloat(ratio.toFixed(2)),
             slopeDelta: parseFloat(deltaSlope.toFixed(2)),
             zScore: parseFloat(zScore.toFixed(2)),
-            isSpike: isSpike,
+            isBurst: isBurst,
+            burstCount: burstCount,
+            burstWindowMin: config.shortWindowMin,
+            burstThreshold: config.burstThreshold,
             wouldBeDetected: wouldBeDetected,
-            minRecChangeRequired: config.minRecChange,
             snapshotCount: snapshots.length,
             lastSnapshot: latestSnapshot.collectedAt
           });
@@ -331,6 +341,11 @@ router.get('/debug/api/posts', async (req, res) => {
             slopeRatio: 0,
             slopeDelta: 0,
             zScore: 0,
+            isBurst: false,
+            burstCount: 0,
+            burstWindowMin: config.shortWindowMin,
+            burstThreshold: config.burstThreshold,
+            wouldBeDetected: false,
             snapshotCount: snapshots.length,
             lastSnapshot: snapshots.length > 0 ? snapshots[0].collectedAt : null
           });
@@ -349,6 +364,11 @@ router.get('/debug/api/posts', async (req, res) => {
           slopeRatio: 0,
           slopeDelta: 0,
           zScore: 0,
+          isBurst: false,
+          burstCount: 0,
+          burstWindowMin: config.shortWindowMin,
+          burstThreshold: config.burstThreshold,
+          wouldBeDetected: false,
           snapshotCount: 0,
           lastSnapshot: null,
           error: err.message
@@ -398,6 +418,112 @@ router.get('/debug/api/stats', async (req, res) => {
     res.status(500).json({ 
       success: false,
       error: '디버그 시스템 통계를 조회하는 중 오류가 발생했습니다.' 
+    });
+  }
+});
+
+// 시스템 설정 조회 API
+router.get('/debug/api/config', (req, res) => {
+  try {
+    // 이상치 감지 관련 설정만 반환
+    const detectionConfig = {
+      zScoreThreshold: config.zScoreThreshold,
+      minRecChange: config.minRecChange,
+      shortWindowMin: config.shortWindowMin,
+      longWindowMin: config.longWindowMin,
+      slopeRatioThresh: config.slopeRatioThresh,
+      slopeDeltaThresh: config.slopeDeltaThresh
+    };
+    
+    res.json({
+      success: true,
+      config: detectionConfig
+    });
+  } catch (err) {
+    console.error('설정 조회 오류:', err);
+    res.status(500).json({ 
+      success: false,
+      error: '시스템 설정을 조회하는 중 오류가 발생했습니다.' 
+    });
+  }
+});
+
+
+
+// 전체 스냅샷 재검증 API
+router.post('/debug/api/revalidate-all', (req, res) => {
+  try {
+    // 이미 재검증 중인지 확인
+    if (global.revalidationInProgress) {
+      return res.json({
+        success: false,
+        message: '이미 재검증이 진행 중입니다.',
+        startTime: global.revalidationStartTime
+      });
+    }
+    
+    // 실행 중 표시를 위한 상태 저장
+    global.revalidationInProgress = true;
+    global.revalidationStartTime = new Date();
+    global.revalidationError = null;
+    
+    // 응답 먼저 전송
+    res.json({
+      success: true,
+      message: '전체 스냅샷 재검증이 시작되었습니다.',
+      startTime: global.revalidationStartTime
+    });
+    
+    // 비동기로 재검증 실행
+    setTimeout(() => {
+      revalidateAllSnapshots()
+        .then(success => {
+          global.revalidationInProgress = false;
+          global.revalidationEndTime = new Date();
+          global.revalidationSuccess = success;
+        })
+        .catch(err => {
+          global.revalidationInProgress = false;
+          global.revalidationEndTime = new Date();
+          global.revalidationSuccess = false;
+          global.revalidationError = err.message;
+          console.error('전체 스냅샷 재검증 중 오류:', err);
+        });
+    }, 100);
+  } catch (err) {
+    // 오류 발생 시 상태 리셋
+    global.revalidationInProgress = false;
+    console.error('재검증 시작 오류:', err);
+    
+    // 응답이 아직 전송되지 않았다면 오류 응답 전송
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false,
+        error: '전체 스냅샷 재검증을 시작하는 중 오류가 발생했습니다.' 
+      });
+    }
+  }
+});
+
+// 전체 스냅샷 재검증 상태 조회 API
+router.get('/debug/api/revalidate-status', (req, res) => {
+  try {
+    // global 변수의 존재 여부 확인 후 안전하게 값 반환
+    const status = {
+      success: true,
+      inProgress: !!global.revalidationInProgress,
+      startTime: global.revalidationStartTime || null,
+      endTime: global.revalidationEndTime || null,
+      isSuccess: global.revalidationSuccess === undefined ? null : global.revalidationSuccess,
+      error: global.revalidationError || null
+    };
+    
+    res.json(status);
+  } catch (err) {
+    console.error('재검증 상태 조회 오류:', err);
+    res.status(500).json({ 
+      success: false,
+      error: '재검증 상태를 조회하는 중 오류가 발생했습니다.' 
     });
   }
 });

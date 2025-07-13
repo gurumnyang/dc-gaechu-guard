@@ -18,8 +18,8 @@
           </div>
           <div class="col-md-4">
             <div class="input-group">
-              <span class="input-group-text">최소 Z-Score</span>
-              <input type="number" class="form-control" id="minZScoreFilter" step="0.5" value="3">
+              <span class="input-group-text">최소 버스트 수</span>
+              <input type="number" class="form-control" id="minBurstFilter" step="1" value="5">
             </div>
           </div>
           <div class="col-md-4">
@@ -35,7 +35,8 @@
                 <th>갤러리</th>
                 <th>게시글 번호</th>
                 <th>제목</th>
-                <th>Z-Score</th>
+                <th>버스트 수</th>
+                <th>버스트 윈도우(분)</th>
                 <th>이전 추천수</th>
                 <th>현재 추천수</th>
                 <th>변화량</th>
@@ -72,7 +73,7 @@
             sort: d.columns[d.order[0].column].data,
             order: d.order[0].dir,
             gallery: $('#galleryFilter').val(),
-            minZScore: $('#minZScoreFilter').val()
+            minBurst: $('#minBurstFilter').val()
           };
         },
         dataSrc: function (json) {
@@ -85,7 +86,8 @@
                 galleryId: item.galleryId,
                 postNo: item.postNo,
                 subject: item.post ? item.post.subject : '제목 없음',
-                zScore: stats.zScore != null ? stats.zScore.toFixed(2) : 'N/A',
+                burstCount: stats.burstCount != null ? stats.burstCount : 'N/A',
+                burstWindowMin: stats.burstWindowMin != null ? stats.burstWindowMin : 'N/A',
                 previousCount: before,
                 currentCount: after,
                 change: after - before,
@@ -101,21 +103,18 @@
         { data: 'postNo' },
         { data: 'subject' },
         { 
-          data: 'zScore',
+          data: 'burstCount',
           render: function(data) {
             let cls = '';
-            const absValue = Math.abs(parseFloat(data) || 0);
+            const burstCount = parseInt(data) || 0;
             
-            if (absValue >= 3.0) cls = 'text-danger fw-bold';
-            else if (absValue >= 2.0) cls = 'text-warning fw-bold';
-            else if (absValue >= 1.5) cls = 'text-primary';
-            
-            // 음수인 경우 (추천수 감소)
-            if (parseFloat(data) < 0) cls += ' fst-italic';
+            if (burstCount >= 10) cls = 'text-danger fw-bold';
+            else if (burstCount >= 5) cls = 'text-warning fw-bold';
             
             return `<span class="${cls}">${data}</span>`;
           }
         },
+        { data: 'burstWindowMin' },
         { data: 'previousCount' },
         { data: 'currentCount' },
         { 
