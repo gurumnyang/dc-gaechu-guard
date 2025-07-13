@@ -1,0 +1,330 @@
+<%- include('./partials/header') %>
+<!-- Chart.js date adapter 추가 -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+<div class="row mb-4">
+  <div class="col-lg-12">
+    <nav aria-label="breadcrumb">
+      <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/dashboard">대시보드</a></li>
+        <li class="breadcrumb-item"><a href="/dashboard/posts">게시글 목록</a></li>
+        <li class="breadcrumb-item active">개추 추이</li>
+      </ol>
+    </nav>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-lg-12 mb-4">
+    <div class="card shadow border-left-info">
+      <div class="card-header bg-gradient-info text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>게시글 <%= postNo %> 추천수 추이</h5>
+        <div>
+          <button id="lastDayBtn" class="btn btn-sm btn-outline-light me-2">최근 24시간</button>
+          <button id="lastWeekBtn" class="btn btn-sm btn-outline-light me-2">최근 7일</button>
+          <button id="allTimeBtn" class="btn btn-sm btn-light">전체 기간</button>
+        </div>
+      </div>
+      <div class="card-body p-4">
+        <div class="chart-container" style="position: relative; height:70vh;">
+          <canvas id="snapshotChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-lg-4 mb-4">
+    <div class="card shadow border-left-primary">
+      <div class="card-header bg-gradient-primary text-white">
+        <h6 class="mb-0">최대 추천수</h6>
+      </div>
+      <div class="card-body">
+        <div class="text-center">
+          <h2 id="maxRecommend">-</h2>
+          <p id="maxRecommendTime" class="text-muted">-</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4 mb-4">
+    <div class="card shadow border-left-success">
+      <div class="card-header bg-gradient-success text-white">
+        <h6 class="mb-0">증가율</h6>
+      </div>
+      <div class="card-body">
+        <div class="text-center">
+          <h2 id="increaseRate">-</h2>
+          <p class="text-muted">최초 대비 증가율</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4 mb-4">
+    <div class="card shadow border-left-warning">
+      <div class="card-header bg-gradient-warning text-white">
+        <h6 class="mb-0">시간당 평균 증가</h6>
+      </div>
+      <div class="card-body">
+        <div class="text-center">
+          <h2 id="hourlyAvg">-</h2>
+          <p class="text-muted">추천수/시간</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const postNo = '<%= postNo %>';
+    let snapshotChart = null;
+    let snapshotData = [];
+    
+    // 필터 버튼 이벤트 리스너
+    document.getElementById('lastDayBtn').addEventListener('click', () => filterData('1d'));
+    document.getElementById('lastWeekBtn').addEventListener('click', () => filterData('7d'));
+    document.getElementById('allTimeBtn').addEventListener('click', () => filterData('all'));
+    
+    // API에서 스냅샷 데이터 가져오기
+    fetch(`/dashboard/api/posts/${postNo}/snapshots`)
+      .then(response => response.json())
+      .then(result => {
+        if (!result.data || !result.data.length) {
+          showNoDataMessage();
+          return;
+        }
+        
+        snapshotData = result.data;
+        
+        // 데이터 정렬 (시간 순)
+        snapshotData.sort((a, b) => new Date(a.time) - new Date(b.time));
+        
+        // 초기 차트 렌더링 (전체 기간)
+        renderChart(snapshotData);
+        
+        // 통계 카드 업데이트
+        updateStatCards(snapshotData);
+      })
+      .catch(error => {
+        console.error('스냅샷 차트 데이터 로드 오류:', error);
+        showErrorMessage();
+      });
+      
+    // 차트 렌더링 함수
+    function renderChart(data) {
+      const ctx = document.getElementById('snapshotChart').getContext('2d');
+      
+      // 이미 차트가 있으면 제거
+      if (snapshotChart) snapshotChart.destroy();
+      
+      const labels = data.map(item => new Date(item.time));
+      const recommendData = data.map(item => item.recommend);
+      
+      const gradientFill = ctx.createLinearGradient(0, 0, 0, 400);
+      gradientFill.addColorStop(0, 'rgba(54, 162, 235, 0.4)');
+      gradientFill.addColorStop(1, 'rgba(54, 162, 235, 0.0)');
+      
+      snapshotChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: '추천수',
+            data: recommendData,
+            backgroundColor: gradientFill,
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 3,
+            pointBackgroundColor: 'rgba(54, 162, 235, 1)', 
+            pointBorderColor: 'rgba(255, 255, 255, 1)',
+            pointHoverRadius: 6,
+            pointHoverBackgroundColor: 'rgba(255, 255, 255, 1)',
+            pointHoverBorderColor: 'rgba(54, 162, 235, 1)',
+            pointHoverBorderWidth: 2,
+            pointRadius: 4,
+            fill: true,
+            tension: 0.3
+          }]
+        },
+        options: {
+          scales: {
+            x: {
+              type: 'time',
+              time: {
+                unit: data.length > 48 ? 'day' : 'hour',
+                displayFormats: {
+                  hour: 'MM/dd HH:mm',
+                  day: 'MM/dd'
+                },
+                tooltipFormat: 'yyyy-MM-dd HH:mm'
+              },
+              grid: {
+                display: true,
+                color: 'rgba(0, 0, 0, 0.05)'
+              },
+              ticks: {
+                maxRotation: 0,
+                autoSkip: true,
+                autoSkipPadding: 20
+              }
+            },
+            y: {
+              display: true,
+              title: {
+                display: true,
+                text: '추천수',
+                font: {
+                  weight: 'bold'
+                }
+              },
+              beginAtZero: true,
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              titleFont: {
+                size: 14,
+                weight: 'bold'
+              },
+              bodyFont: {
+                size: 13
+              },
+              padding: 12,
+              displayColors: false,
+              callbacks: {
+                title: context => {
+                  const date = new Date(context[0].parsed.x);
+                  return date.toLocaleString();
+                },
+                label: context => `추천수: ${context.parsed.y}`
+              }
+            }
+          },
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false
+          },
+          animation: {
+            duration: 1000,
+            easing: 'easeOutQuart'
+          }
+        }
+      });
+    }
+    
+    // 데이터 필터링 함수
+    function filterData(period) {
+      if (!snapshotData.length) return;
+      
+      // 버튼 활성화 상태 변경
+      document.getElementById('lastDayBtn').classList.remove('btn-light');
+      document.getElementById('lastDayBtn').classList.add('btn-outline-light');
+      document.getElementById('lastWeekBtn').classList.remove('btn-light');
+      document.getElementById('lastWeekBtn').classList.add('btn-outline-light');
+      document.getElementById('allTimeBtn').classList.remove('btn-light');
+      document.getElementById('allTimeBtn').classList.add('btn-outline-light');
+      
+      let filteredData = [];
+      const now = new Date();
+      
+      switch(period) {
+        case '1d':
+          const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000);
+          filteredData = snapshotData.filter(item => new Date(item.time) >= oneDayAgo);
+          document.getElementById('lastDayBtn').classList.remove('btn-outline-light');
+          document.getElementById('lastDayBtn').classList.add('btn-light');
+          break;
+        case '7d':
+          const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+          filteredData = snapshotData.filter(item => new Date(item.time) >= sevenDaysAgo);
+          document.getElementById('lastWeekBtn').classList.remove('btn-outline-light');
+          document.getElementById('lastWeekBtn').classList.add('btn-light');
+          break;
+        default:
+          filteredData = [...snapshotData];
+          document.getElementById('allTimeBtn').classList.remove('btn-outline-light');
+          document.getElementById('allTimeBtn').classList.add('btn-light');
+      }
+      
+      renderChart(filteredData);
+      updateStatCards(filteredData);
+    }
+    
+    // 통계 카드 업데이트 함수
+    function updateStatCards(data) {
+      if (!data.length) return;
+      
+      // 최대 추천수 찾기
+      const maxRecommendObj = data.reduce((max, item) => 
+        item.recommend > max.recommend ? item : max, data[0]);
+      const maxRecommend = maxRecommendObj.recommend;
+      const maxTime = new Date(maxRecommendObj.time).toLocaleString();
+      
+      // 증가율 계산
+      const firstRecommend = data[0].recommend;
+      const lastRecommend = data[data.length - 1].recommend;
+      let increaseRate = 0;
+      
+      if (firstRecommend > 0) {
+        increaseRate = ((lastRecommend - firstRecommend) / firstRecommend * 100).toFixed(1);
+      } else {
+        increaseRate = lastRecommend > 0 ? '∞' : '0.0';
+      }
+      
+      // 시간당 평균 증가율
+      const firstTime = new Date(data[0].time);
+      const lastTime = new Date(data[data.length - 1].time);
+      const hourDiff = Math.max(1, (lastTime - firstTime) / (1000 * 60 * 60));
+      const hourlyAvg = ((lastRecommend - firstRecommend) / hourDiff).toFixed(1);
+      
+      // DOM 업데이트
+      document.getElementById('maxRecommend').textContent = maxRecommend;
+      document.getElementById('maxRecommendTime').textContent = maxTime;
+      document.getElementById('increaseRate').textContent = increaseRate + '%';
+      document.getElementById('hourlyAvg').textContent = hourlyAvg;
+    }
+    
+    // 데이터 없음 메시지
+    function showNoDataMessage() {
+      const chartContainer = document.querySelector('.chart-container');
+      chartContainer.innerHTML = `
+        <div class="text-center py-5">
+          <i class="fas fa-chart-area fa-4x text-gray-300 mb-3"></i>
+          <h5 class="text-gray-600">해당 게시글의 스냅샷 데이터가 없습니다.</h5>
+          <p class="text-muted">데이터가 수집되면 차트가 표시됩니다.</p>
+        </div>
+      `;
+    }
+    
+    // 오류 메시지
+    function showErrorMessage() {
+      const chartContainer = document.querySelector('.chart-container');
+      chartContainer.innerHTML = `
+        <div class="text-center py-5">
+          <i class="fas fa-exclamation-triangle fa-4x text-danger mb-3"></i>
+          <h5 class="text-danger">데이터를 불러오는 중 오류가 발생했습니다.</h5>
+          <p class="text-muted">잠시 후 다시 시도해 주세요.</p>
+        </div>
+      `;
+    }
+  });
+  
+  // 반응형 디자인을 위한 리사이즈 이벤트 핸들러
+  window.addEventListener('resize', function() {
+    if (snapshotChart) {
+      snapshotChart.resize();
+    }
+  });
+</script>
+
+<%- include('./partials/footer') %>

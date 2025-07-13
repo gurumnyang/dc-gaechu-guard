@@ -1,0 +1,414 @@
+<%- include('partials/header') %>
+
+<div class="container-fluid mt-4">
+  <h2>디버그 대시보드 - 게시글별 추천수 통계</h2>
+  
+  <div class="card mb-4">
+    <div class="card-header">
+      <i class="fas fa-info-circle me-1"></i>
+      시스템 디버그 정보
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <h5>서버 상태 확인</h5>
+          <div id="serverStatus" class="alert alert-info">
+            서버 상태를 확인 중입니다...
+          </div>
+          <div id="apiStatus" class="mt-2">
+            <button id="checkApiBtn" class="btn btn-sm btn-primary">API 상태 확인</button>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <h5>데이터 통계</h5>
+          <div id="dataStats" class="alert alert-light">
+            <p><strong>로딩 중...</strong></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="card mb-4">
+    <div class="card-header">
+      <i class="fas fa-table me-1"></i>
+      게시글별 추천수 변화 분석
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info mb-3">
+        <h6><i class="fas fa-circle-info"></i> 이상치 감지 조건</h6>
+        <p class="mb-1">다음 세 가지 조건 중 <strong>하나라도</strong> 충족하며, 추천수 증가량이 최소 임계값(기본 5) 이상인 경우 이상치로 간주됩니다:</p>
+        <ul class="mb-0 small">
+          <li><strong>단기/장기 기울기 비율</strong> >= 4.0 <b>그리고</b> <strong>기울기 차이</strong> > 0 (단기 추세가 장기 추세보다 빠를 때)</li>
+          <li><strong>기울기 차이</strong> >= 0.4 (단기와 장기 추세 간 큰 차이가 있을 때)</li>
+          <li><strong>Z-Score 절대값</strong> >= 3.0 (통계적으로 비정상적인 변화일 때)</li>
+        </ul>
+      </div>
+      <div class="mb-3">
+        <div class="btn-group">
+          <button class="btn btn-sm btn-outline-primary refresh-btn">
+            <i class="fas fa-sync-alt"></i> 새로고침
+          </button>
+          <button class="btn btn-sm btn-outline-danger filter-anomalies">
+            <i class="fas fa-exclamation-triangle"></i> Z-Score > 2.0
+          </button>
+          <button class="btn btn-sm btn-outline-success filter-high-changes">
+            <i class="fas fa-arrow-trend-up"></i> 분당 추천수 > 1
+          </button>
+          <button class="btn btn-sm btn-outline-warning filter-slope-ratio">
+            <i class="fas fa-chart-line"></i> 기울기 비율 > 4.0
+          </button>
+          <button class="btn btn-sm btn-outline-info filter-slope-delta">
+            <i class="fas fa-arrows-up-down"></i> 기울기 차이 > 0.4
+          </button>
+          <button class="btn btn-sm btn-outline-danger filter-would-detect">
+            <i class="fas fa-radar"></i> 이상치 감지 대상
+          </button>
+          <button class="btn btn-sm btn-outline-secondary reset-filter">
+            <i class="fas fa-filter-circle-xmark"></i> 필터 초기화
+          </button>
+        </div>
+      </div>
+      
+      <table id="debugTable" class="table table-striped table-bordered table-hover" style="width:100%">
+        <thead>
+          <tr>
+            <th>갤러리</th>
+            <th>게시글 번호</th>
+            <th>제목</th>
+            <th>최근 추천</th>
+            <th>이전 추천</th>
+            <th>추천수 변화</th>
+            <th>분당 변화율</th>
+            <th>시간 간격(분)</th>
+            <th>단기 기울기</th>
+            <th>장기 기울기</th>
+            <th>기울기 비율</th>
+            <th>기울기 차이</th>
+            <th>Z-Score</th>
+            <th>감지 여부</th>
+            <th>스냅샷 수</th>
+            <th>마지막 수집</th>
+            <th>작성일</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- 데이터 동적 로드 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+// 설정값 하드코딩 (서버에서 설정된 값과 맞추세요)
+const configValues = {
+  slopeRatioThresh: 4.0,
+  slopeDeltaThresh: 0.4
+};
+
+$(document).ready(function() {
+  // DataTable 초기화
+  var table = $('#debugTable').DataTable({
+    processing: true,
+    serverSide: true,
+    ajax: {
+      url: '/debug/api/posts',
+      data: function(d) {
+        // 필요한 추가 파라미터
+        return $.extend({}, d, {
+          gallery: $('#galleryFilter').val()
+        });
+      },
+      dataSrc: 'data',
+      error: function(xhr, error, thrown) {
+        console.error('데이터를 불러오는 중 오류가 발생했습니다:', error, thrown);
+        return [];
+      }
+    },
+    deferRender: true,
+    
+    columns: [
+      { data: 'galleryId' },
+      { 
+        data: 'postNo',
+        render: function(data, type, row) {
+          return `<a href="https://gall.dcinside.com/board/view/?id=${row.galleryId}&no=${data}" target="_blank">${data}</a>`;
+        }
+      },
+      { 
+        data: 'title',
+        render: function(data, type, row) {
+          return `<a href="/dashboard/posts/${row.postNo}/snapshots" class="text-truncate d-inline-block" style="max-width: 200px;" title="${data.replace(/"/g, '&quot;')}">${data}</a>`;
+        }
+      },
+      { data: 'latestRecommend' },
+      { data: 'prevRecommend' },
+      { 
+        data: 'recChange',
+        render: function(data) {
+          const cls = data > 0 ? 'text-success' : data < 0 ? 'text-danger' : '';
+          const prefix = data > 0 ? '+' : '';
+          return `<span class="${cls}">${prefix}${data}</span>`;
+        }
+      },
+      { 
+        data: 'recChangePerMin',
+        render: function(data) {
+          const cls = data > 1 ? 'text-success fw-bold' : data > 0.5 ? 'text-success' : '';
+          const prefix = data > 0 ? '+' : '';
+          return `<span class="${cls}">${prefix}${data}</span>`;
+        }
+      },
+      { data: 'timeDiffMin' },
+      { 
+        data: 'shortSlope',
+        render: function(data) {
+          const cls = data > 1 ? 'text-success fw-bold' : data > 0.5 ? 'text-success' : '';
+          const prefix = data > 0 ? '+' : '';
+          return `<span class="${cls}">${prefix}${data}</span>`;
+        }
+      },
+      { 
+        data: 'longSlope',
+        render: function(data) {
+          const cls = data > 0.5 ? 'text-info' : '';
+          const prefix = data > 0 ? '+' : '';
+          return `<span class="${cls}">${prefix}${data}</span>`;
+        }
+      },
+      { 
+        data: 'slopeRatio',
+        render: function(data) {
+          let cls = '';
+          if (data >= configValues.slopeRatioThresh) cls = 'text-warning fw-bold';
+          else if (data >= 2.0) cls = 'text-primary';
+          return `<span class="${cls}">${data}</span>`;
+        }
+      },
+      { 
+        data: 'slopeDelta',
+        render: function(data) {
+          let cls = '';
+          if (data >= configValues.slopeDeltaThresh) cls = 'text-warning fw-bold';
+          else if (data >= 0.2) cls = 'text-primary';
+          return `<span class="${cls}">${data}</span>`;
+        }
+      },
+      { 
+        data: 'zScore',
+        render: function(data) {
+          let cls = '';
+          const absValue = Math.abs(data);
+          if (absValue >= 3.0) cls = 'text-danger fw-bold';
+          else if (absValue >= 2.0) cls = 'text-warning fw-bold';
+          else if (absValue >= 1.5) cls = 'text-primary';
+          
+          // 음수인 경우 (추천수 감소)
+          if (data < 0) cls += ' fst-italic';
+          
+          return `<span class="${cls}">${data}</span>`;
+        }
+      },
+      { 
+        data: 'wouldBeDetected',
+        render: function(data, type, row) {
+          if (row.isSpike) {
+            if (data) {
+              return `<span class="badge bg-danger"><i class="fas fa-triangle-exclamation"></i> 이상치 감지</span>`;
+            } else {
+              return `<span class="badge bg-warning" title="추천수 ${row.minRecChangeRequired}개 이상 필요"><i class="fas fa-circle-exclamation"></i> 조건 충족 (추천수 부족)</span>`;
+            }
+          } else {
+            return `<span class="badge bg-success"><i class="fas fa-circle-check"></i> 정상</span>`;
+          }
+        }
+      },
+      { data: 'snapshotCount' },
+      { 
+        data: 'lastSnapshot',
+        render: function(data) {
+          return data ? new Date(data).toLocaleString() : '-';
+        }
+      },
+      { 
+        data: 'createdAt',
+        render: function(data) {
+          return new Date(data).toLocaleString();
+        }
+      }
+    ],
+    order: [[12, 'desc']], // Z-Score 기준 내림차순 정렬
+    pageLength: 25,
+    pagingType: 'full_numbers',
+    language: {
+      "emptyTable": "데이터가 없습니다",
+      "info": "_START_ - _END_ / _TOTAL_",
+      "infoEmpty": "0 - 0 / 0",
+      "infoFiltered": "(총 _MAX_ 개)",
+      "lengthMenu": "_MENU_ 개씩 보기",
+      "search": "검색:",
+      "zeroRecords": "일치하는 데이터가 없습니다",
+      "paginate": {
+        "first": "처음",
+        "last": "마지막",
+        "next": "다음",
+        "previous": "이전"
+      }
+    }
+  });
+  
+  // 새로고침 버튼
+  $('.refresh-btn').click(function() {
+    table.ajax.reload();
+  });
+  
+  // 자동 새로고침 (1분마다)
+  setInterval(function() {
+    table.ajax.reload(null, false);
+  }, 60000);
+  
+  // Z-Score 필터링
+  $('.filter-anomalies').click(function() {
+    table.search('').columns().search('').draw();
+    $.fn.dataTable.ext.search.push(
+      function(settings, data, dataIndex, rowData) {
+        return parseFloat(rowData.zScore) >= 2.0;
+      }
+    );
+    table.draw();
+  });
+  
+  // 높은 분당 변화율 필터링
+  $('.filter-high-changes').click(function() {
+    table.search('').columns().search('').draw();
+    $.fn.dataTable.ext.search.push(
+      function(settings, data, dataIndex, rowData) {
+        return parseFloat(rowData.recChangePerMin) >= 1.0;
+      }
+    );
+    table.draw();
+  });
+  
+  // 기울기 비율 필터링
+  $('.filter-slope-ratio').click(function() {
+    table.search('').columns().search('').draw();
+    $.fn.dataTable.ext.search.push(
+      function(settings, data, dataIndex, rowData) {
+        return parseFloat(rowData.slopeRatio) >= configValues.slopeRatioThresh;
+      }
+    );
+    table.draw();
+  });
+
+  // 기울기 차이 필터링
+  $('.filter-slope-delta').click(function() {
+    table.search('').columns().search('').draw();
+    $.fn.dataTable.ext.search.push(
+      function(settings, data, dataIndex, rowData) {
+        return parseFloat(rowData.slopeDelta) >= configValues.slopeDeltaThresh;
+      }
+    );
+    table.draw();
+  });
+  
+  // 이상치 감지 대상 필터링
+  $('.filter-would-detect').click(function() {
+    table.search('').columns().search('').draw();
+    $.fn.dataTable.ext.search.push(
+      function(settings, data, dataIndex, rowData) {
+        return rowData.wouldBeDetected === true;
+      }
+    );
+    table.draw();
+  });
+  
+  // 필터 초기화
+  $('.reset-filter').click(function() {
+    table.search('').columns().search('').draw();
+    $.fn.dataTable.ext.search = [];
+    table.draw();
+  });
+  
+  // 10초마다 행 색상 업데이트 (시각적 피드백)
+  setInterval(function() {
+    $('#debugTable tbody tr').each(function() {
+      $(this).removeClass('table-danger table-warning');
+      
+      // 컬럼 인덱스 재조정
+      // 0: 갤러리, 1: 게시글번호, 2: 제목, 3: 최근추천, 4: 이전추천, 5: 추천변화, 
+      // 6: 분당변화율, 7: 시간간격, 8: 단기기울기, 9: 장기기울기, 10: 기울기비율, 
+      // 11: 기울기차이, 12: Z-Score, 13: 스냅샷수, 14: 마지막수집, 15: 작성일
+      const recChangePerMin = parseFloat($(this).find('td:eq(6)').text());
+      const shortSlope = parseFloat($(this).find('td:eq(8)').text());
+      const longSlope = parseFloat($(this).find('td:eq(9)').text());
+      const slopeRatio = parseFloat($(this).find('td:eq(10)').text());
+      const slopeDelta = parseFloat($(this).find('td:eq(11)').text());
+      const zScore = parseFloat($(this).find('td:eq(12)').text());
+      
+      // 이상치 조건 추가
+      if (zScore >= 3.0 || (slopeRatio >= configValues.slopeRatioThresh && slopeDelta > 0)) {
+        $(this).addClass('table-danger');
+      } else if (zScore >= 2.0 || recChangePerMin >= 1.0 || slopeDelta >= configValues.slopeDeltaThresh) {
+        $(this).addClass('table-warning');
+      }
+    });
+  }, 10000);
+  
+  // 서버 상태 확인
+  function checkServerStatus() {
+    $.ajax({
+      url: '/',
+      type: 'GET',
+      success: function(data) {
+        $('#serverStatus').removeClass('alert-info alert-danger').addClass('alert-success')
+          .html(`<i class="fas fa-check-circle me-2"></i>서버 상태: 정상 (버전: ${data.version})`);
+      },
+      error: function(xhr) {
+        $('#serverStatus').removeClass('alert-info alert-success').addClass('alert-danger')
+          .html(`<i class="fas fa-exclamation-circle me-2"></i>서버 연결 오류: ${xhr.status}`);
+      }
+    });
+  }
+  
+  // 데이터 통계 정보
+  function loadDataStats() {
+    $.ajax({
+      url: '/debug/api/stats',
+      type: 'GET',
+      success: function(data) {
+        if (data && data.stats) {
+          const html = `
+            <p><strong>게시글:</strong> ${data.stats.postsCount}</p>
+            <p><strong>스냅샷:</strong> ${data.stats.snapshotsCount}</p>
+            <p><strong>이상치:</strong> ${data.stats.anomaliesCount}</p>
+            <p><strong>최근 크롤링:</strong> ${new Date(data.stats.lastCrawl).toLocaleString()}</p>
+          `;
+          $('#dataStats').html(html);
+        } else {
+          $('#dataStats').html('<p>통계 데이터를 불러올 수 없습니다.</p>');
+        }
+      },
+      error: function() {
+        $('#dataStats').html('<p>통계 데이터를 불러오는 중 오류가 발생했습니다.</p>');
+      }
+    });
+  }
+  
+  // API 상태 확인 버튼
+  $('#checkApiBtn').click(function() {
+    checkServerStatus();
+    loadDataStats();
+    $(this).prop('disabled', true);
+    setTimeout(() => $(this).prop('disabled', false), 2000);
+  });
+  
+  // 페이지 로드 시 서버 상태 확인
+  checkServerStatus();
+  
+  // 60초마다 자동 새로고침
+  setInterval(checkServerStatus, 60000);
+});
+</script>
+
+<%- include('partials/footer') %>

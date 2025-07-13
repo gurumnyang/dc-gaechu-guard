@@ -1,0 +1,262 @@
+<%- include('./partials/header') %>
+
+<div class="row">
+  <div class="col-lg-12 mb-4">
+    <div class="card shadow">
+      <div class="card-header bg-info text-white">
+        <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>갤러리 통계</h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-lg-6 mb-4">
+            <div class="card shadow">
+              <div class="card-header bg-primary text-white">
+                <h6 class="mb-0">갤러리별 이상치 분포</h6>
+              </div>
+              <div class="card-body">
+                <canvas id="galleryStatsChart" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6 mb-4">
+            <div class="card shadow">
+              <div class="card-header bg-success text-white">
+                <h6 class="mb-0">갤러리별 평균 Z-Score</h6>
+              </div>
+              <div class="card-body">
+                <canvas id="zScoreChart" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-lg-12 mb-4">
+            <div class="card shadow">
+              <div class="card-header bg-warning text-white">
+                <h6 class="mb-0">시간별 이상치 감지 추이</h6>
+              </div>
+              <div class="card-body">
+                <canvas id="timelineChart" height="150"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-lg-12">
+            <div class="card shadow">
+              <div class="card-header bg-secondary text-white">
+                <h6 class="mb-0">갤러리별 통계 요약</h6>
+              </div>
+              <div class="card-body">
+                <div class="table-responsive">
+                  <table class="table table-bordered table-hover" id="galleryStatsTable" width="100%">
+                    <thead class="table-light">
+                      <tr>
+                        <th>갤러리 ID</th>
+                        <th>총 게시글</th>
+                        <th>이상치 수</th>
+                        <th>이상치 비율</th>
+                        <th>평균 Z-Score</th>
+                        <th>최고 Z-Score</th>
+                        <th>최근 이상치 감지</th>
+                      </tr>
+                    </thead>
+                    <tbody id="galleryStatsBody">
+                      <!-- 데이터 로드 후 채워짐 -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // 통계 데이터 로드
+    loadStatsData();
+    
+    // DataTable 초기화
+    $('#galleryStatsTable').DataTable({
+      order: [[2, 'desc']], // 이상치 수 기준으로 정렬
+      pageLength: 10,
+      language: {
+        url: 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/ko.json'
+      }
+    });
+    
+    // 주기적으로 데이터 갱신 (5분마다)
+    setInterval(loadStatsData, 300000);
+  });
+  
+  function loadStatsData() {
+    $.get('/dashboard/api/stats', function(data) {
+      updateGalleryStats(data);
+      updateCharts(data);
+    });
+  }
+  
+  function updateGalleryStats(data) {
+    // 갤러리별 통계 테이블 업데이트
+    const tbody = $('#galleryStatsBody');
+    tbody.empty();
+    
+    // 갤러리별 데이터 처리
+    const galleryStats = {};
+    const galleryPostCounts = {};
+    const galleryMaxZScores = {};
+    const galleryLastDetections = {};
+    
+    // 갤러리별 게시글 수 집계
+    data.galleryStats.forEach(stat => {
+      galleryStats[stat._id] = stat;
+    });
+    
+    // 테이블 데이터 생성 및 추가
+    for (const galleryId in galleryStats) {
+      const stat = galleryStats[galleryId];
+      const totalPosts = galleryPostCounts[galleryId] || 0;
+      const anomalyCount = stat.count || 0;
+      const anomalyRate = totalPosts > 0 ? (anomalyCount / totalPosts * 100).toFixed(2) + '%' : 'N/A';
+      const avgZScore = stat.avgZScore ? stat.avgZScore.toFixed(2) : 'N/A';
+      const maxZScore = galleryMaxZScores[galleryId] ? galleryMaxZScores[galleryId].toFixed(2) : 'N/A';
+      const lastDetection = galleryLastDetections[galleryId] ? 
+        moment(galleryLastDetections[galleryId]).format('YYYY-MM-DD HH:mm') : 'N/A';
+      
+      // Z-Score 값에 대한 색상 클래스 적용
+      const getZScoreClass = (score) => {
+        if (score === 'N/A') return '';
+        const absValue = Math.abs(parseFloat(score));
+        if (absValue >= 3.0) return 'text-danger fw-bold';
+        else if (absValue >= 2.0) return 'text-warning fw-bold';
+        else if (absValue >= 1.5) return 'text-primary';
+        return '';
+      };
+      
+      const avgZScoreClass = getZScoreClass(avgZScore);
+      const maxZScoreClass = getZScoreClass(maxZScore);
+      
+      const row = `<tr>
+        <td>${galleryId}</td>
+        <td>${totalPosts.toLocaleString('ko-KR')}</td>
+        <td>${anomalyCount.toLocaleString('ko-KR')}</td>
+        <td>${anomalyRate}</td>
+        <td><span class="${avgZScoreClass}">${avgZScore}</span></td>
+        <td><span class="${maxZScoreClass}">${maxZScore}</span></td>
+        <td>${lastDetection}</td>
+      </tr>`;
+      tbody.append(row);
+    }
+    
+    // DataTable 갱신
+    $('#galleryStatsTable').DataTable().clear().rows.add(tbody.find('tr')).draw();
+  }
+  
+  function updateCharts(data) {
+    // 갤러리별 이상치 분포 차트
+    const galleryChartCtx = document.getElementById('galleryStatsChart').getContext('2d');
+    if (window.galleryChart) window.galleryChart.destroy();
+    
+    const galleryLabels = data.galleryStats.map(d => d._id);
+    const galleryValues = data.galleryStats.map(d => d.count);
+    
+    window.galleryChart = new Chart(galleryChartCtx, {
+      type: 'bar',
+      data: {
+        labels: galleryLabels,
+        datasets: [{
+          label: '갤러리별 이상치 수',
+          data: galleryValues,
+          backgroundColor: 'rgba(78, 115, 223, 0.8)',
+          borderColor: 'rgba(78, 115, 223, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0
+            }
+          }
+        }
+      }
+    });
+    
+    // 평균 Z-Score 차트
+    const zScoreChartCtx = document.getElementById('zScoreChart').getContext('2d');
+    if (window.zScoreChart) window.zScoreChart.destroy();
+    
+    const zScoreLabels = data.galleryStats.map(d => d._id);
+    const zScoreValues = data.galleryStats.map(d => d.avgZScore);
+    
+    window.zScoreChart = new Chart(zScoreChartCtx, {
+      type: 'bar',
+      data: {
+        labels: zScoreLabels,
+        datasets: [{
+          label: '평균 Z-Score',
+          data: zScoreValues,
+          backgroundColor: 'rgba(28, 200, 138, 0.8)',
+          borderColor: 'rgba(28, 200, 138, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+    
+    // 시간별 이상치 추이 차트
+    const timelineChartCtx = document.getElementById('timelineChart').getContext('2d');
+    if (window.timelineChart) window.timelineChart.destroy();
+    
+    const timelineLabels = data.dailyAnomalies.map(d => d._id);
+    const timelineValues = data.dailyAnomalies.map(d => d.count);
+    
+    window.timelineChart = new Chart(timelineChartCtx, {
+      type: 'line',
+      data: {
+        labels: timelineLabels,
+        datasets: [{
+          label: '일별 이상치 감지 수',
+          data: timelineValues,
+          backgroundColor: 'rgba(246, 194, 62, 0.2)',
+          borderColor: 'rgba(246, 194, 62, 1)',
+          borderWidth: 2,
+          tension: 0.1,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0
+            }
+          }
+        }
+      }
+    });
+  }
+</script>
+
+<%- include('./partials/footer') %>

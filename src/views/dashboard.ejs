@@ -1,0 +1,306 @@
+<%- include('./partials/header') %>
+
+<div class="row">
+  <div class="col-lg-12 mb-4">
+    <div class="card shadow">
+      <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="fas fa-tachometer-alt me-2"></i>DC 갤러리 가드 대시보드</h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100">
+              <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                  <div class="col mr-2">
+                    <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                      총 크롤링 게시글</div>
+                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalPosts">-</div>
+                  </div>
+                  <div class="col-auto">
+                    <i class="fas fa-file-alt fa-2x text-gray-300"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100">
+              <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                  <div class="col mr-2">
+                    <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                      총 이상치 감지</div>
+                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalAnomalies">-</div>
+                  </div>
+                  <div class="col-auto">
+                    <i class="fas fa-exclamation-triangle fa-2x text-gray-300"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100">
+              <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                  <div class="col mr-2">
+                    <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                      모니터링 갤러리</div>
+                    <div class="h5 mb-0 font-weight-bold text-gray-800" id="totalGalleries">-</div>
+                  </div>
+                  <div class="col-auto">
+                    <i class="fas fa-list fa-2x text-gray-300"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-info shadow h-100">
+              <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                  <div class="col mr-2">
+                    <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                      이상치 비율</div>
+                    <div class="row no-gutters align-items-center">
+                      <div class="col-auto">
+                        <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800" id="anomalyRate">-</div>
+                      </div>
+                      <div class="col">
+                        <div class="progress progress-sm mr-2">
+                          <div class="progress-bar bg-info" role="progressbar" id="anomalyRateBar"
+                            style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-auto">
+                    <i class="fas fa-clipboard-list fa-2x text-gray-300"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-lg-8">
+            <div class="card shadow mb-4">
+              <div class="card-header bg-info text-white">
+                <h6 class="mb-0"><i class="fas fa-chart-area me-2"></i>시간대별 이상치 추이</h6>
+              </div>
+              <div class="card-body">
+                <canvas id="anomalyTrend" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="card shadow mb-4">
+              <div class="card-header bg-warning text-white">
+                <h6 class="mb-0"><i class="fas fa-chart-pie me-2"></i>갤러리별 이상치 분포</h6>
+              </div>
+              <div class="card-body">
+                <canvas id="galleryPieChart" height="300"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-lg-12">
+            <div class="card shadow mb-4">
+              <div class="card-header bg-danger text-white">
+                <h6 class="mb-0"><i class="fas fa-exclamation-circle me-2"></i>최근 감지된 이상치</h6>
+              </div>
+              <div class="card-body">
+                <div class="table-responsive">
+                  <table class="table table-bordered table-hover" id="recentAnomaliesTable" width="100%">
+                    <thead class="table-light">
+                      <tr>
+                        <th>감지 시간</th>
+                        <th>갤러리</th>
+                        <th>게시글 번호</th>
+                        <th>제목</th>
+                        <th>Z-Score</th>
+                        <th>추천수</th>
+                      </tr>
+                    </thead>
+                    <tbody id="recentAnomaliesBody">
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // 대시보드 데이터 로드
+    loadDashboardData();
+    
+    // DataTable 초기화
+    $('#recentAnomaliesTable').DataTable({
+      order: [[0, 'desc']],
+      pageLength: 5,
+      lengthMenu: [5, 10, 25],
+      language: {
+        url: 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/ko.json'
+      }
+    });
+    
+    // 주기적으로 데이터 갱신 (1분마다)
+    setInterval(loadDashboardData, 60000);
+  });
+  
+  function loadDashboardData() {
+    $.get('/dashboard/api/stats', function(data) {
+      // 기본 통계 업데이트
+      $('#totalPosts').text(data.totalPosts.toLocaleString('ko-KR'));
+      $('#totalAnomalies').text(data.totalAnomalies.toLocaleString('ko-KR'));
+      
+      // 갤러리 수 계산
+      const uniqueGalleries = new Set();
+      data.galleryStats.forEach(stat => uniqueGalleries.add(stat._id));
+      $('#totalGalleries').text(uniqueGalleries.size);
+      
+      // 이상치 비율 계산
+      const anomalyRate = data.totalPosts > 0 ? (data.totalAnomalies / data.totalPosts * 100).toFixed(2) : 0;
+      $('#anomalyRate').text(anomalyRate + '%');
+      $('#anomalyRateBar').css('width', anomalyRate + '%').attr('aria-valuenow', anomalyRate);
+      
+      // 최근 이상치 테이블 업데이트
+      updateRecentAnomaliesTable(data.recentAnomalies);
+      
+      // 차트 업데이트
+      updateCharts(data);
+    });
+  }
+  
+  function updateRecentAnomaliesTable(anomalies) {
+    const tbody = $('#recentAnomaliesBody');
+    tbody.empty();
+    
+    anomalies.forEach(anomaly => {
+      const post = anomaly.post || {};
+      const row = `<tr>
+        <td>${moment(anomaly.detectedAt).format('YYYY-MM-DD HH:mm:ss')}</td>
+        <td>${anomaly.galleryId}</td>
+        <td>${anomaly.postNo}</td>
+        <td>${post.subject || '제목 없음'}</td>
+        <td>${anomaly.zScore ? anomaly.zScore.toFixed(2) : 'N/A'}</td>
+        <td>${anomaly.recommendCount || 0}</td>
+      </tr>`;
+      tbody.append(row);
+    });
+    
+    // DataTable 새로고침
+    $('#recentAnomaliesTable').DataTable().clear().rows.add(tbody.find('tr')).draw();
+  }
+  
+  function updateCharts(data) {
+    // 시간대별 이상치 추이 차트
+    const trendCtx = document.getElementById('anomalyTrend').getContext('2d');
+    if (window.trendChart) window.trendChart.destroy();
+    
+    const trendLabels = data.dailyAnomalies.map(d => d._id);
+    const trendValues = data.dailyAnomalies.map(d => d.count);
+    
+    window.trendChart = new Chart(trendCtx, {
+      type: 'line',
+      data: {
+        labels: trendLabels,
+        datasets: [{
+          label: '일일 이상치 감지 수',
+          data: trendValues,
+          borderColor: 'rgba(78, 115, 223, 1)',
+          backgroundColor: 'rgba(78, 115, 223, 0.1)',
+          borderWidth: 2,
+          tension: 0.1,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true
+          },
+          tooltip: {
+            callbacks: {
+              title: (tooltipItems) => {
+                return tooltipItems[0].label;
+              },
+              label: (tooltipItem) => {
+                return `이상치 감지: ${tooltipItem.raw}건`;
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              precision: 0
+            }
+          }
+        }
+      }
+    });
+    
+    // 갤러리별 이상치 분포 파이차트
+    const pieCtx = document.getElementById('galleryPieChart').getContext('2d');
+    if (window.pieChart) window.pieChart.destroy();
+    
+    const galleryNames = data.galleryStats.map(d => d._id);
+    const galleryValues = data.galleryStats.map(d => d.count);
+    
+    // 색상 배열
+    const backgroundColors = [
+      'rgba(255, 99, 132, 0.7)',
+      'rgba(54, 162, 235, 0.7)',
+      'rgba(255, 206, 86, 0.7)',
+      'rgba(75, 192, 192, 0.7)',
+      'rgba(153, 102, 255, 0.7)',
+      'rgba(255, 159, 64, 0.7)',
+      'rgba(255, 99, 255, 0.7)',
+      'rgba(54, 255, 163, 0.7)'
+    ];
+    
+    window.pieChart = new Chart(pieCtx, {
+      type: 'doughnut',
+      data: {
+        labels: galleryNames,
+        datasets: [{
+          data: galleryValues,
+          backgroundColor: backgroundColors,
+          borderColor: 'rgba(255, 255, 255, 0.5)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              boxWidth: 15
+            }
+          }
+        }
+      }
+    });
+  }
+</script>
+
+<%- include('./partials/footer') %>

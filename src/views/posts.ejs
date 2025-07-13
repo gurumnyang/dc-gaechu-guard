@@ -1,0 +1,156 @@
+<%- include('./partials/header') %>
+
+<div class="row">
+  <div class="col-lg-12 mb-4">
+    <div class="card shadow">
+      <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="fas fa-list me-2"></i>게시글 목록</h5>
+      </div>
+      <div class="card-body">
+        <div class="row mb-4">
+          <div class="col-md-4">
+            <div class="input-group">
+              <span class="input-group-text">갤러리</span>
+              <select class="form-select" id="galleryFilter">
+                <option value="">전체 갤러리</option>
+              </select>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="input-group">
+              <span class="input-group-text">제목</span>
+              <input type="text" class="form-control" id="subjectFilter" placeholder="검색어 입력">
+            </div>
+          </div>
+          <div class="col-md-4">
+            <button class="btn btn-primary w-100" id="applyFilters">필터 적용</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover" id="postsTable" width="100%">
+            <thead class="table-light">
+              <tr>
+                <th>게시글 번호</th>
+                <th>갤러리</th>
+                <th>제목</th>
+                <th>작성자</th>
+                <th>작성일</th>
+                <th>추천수</th>
+                <th>비추천수</th>
+                <th>조회수</th>
+                <th>이상치 감지</th>
+                <th>링크</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- DataTable이 채워줌 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let postsTable;
+  let galleryList = [];
+  
+  document.addEventListener('DOMContentLoaded', function() {
+    // DataTable 초기화
+    postsTable = $('#postsTable').DataTable({
+      processing: true,
+      serverSide: true,
+      ajax: {
+        url: '/dashboard/api/posts/data',
+        data: function (d) {
+          return {
+            draw: d.draw,
+            page: d.start / d.length,
+            size: d.length,
+            sort: d.columns[d.order[0].column].data,
+            order: d.order[0].dir,
+            gallery: $('#galleryFilter').val(),
+            subject: $('#subjectFilter').val()
+          };
+        },
+        dataSrc: function (json) {
+          return json.data.map(function (item) {
+            return {
+              postNo: item.postNo,
+              galleryId: item.galleryId,
+              subject: item.subject || '제목 없음',
+              author: item.author || '익명',
+              postDate: moment(item.createdAt).format('YYYY-MM-DD HH:mm'),
+              recommendCount: item.recommendCount || 0,
+              nonRecommendCount: item.nonRecommendCount || 0,
+              viewCount: item.viewCount || 0,
+              hasAnomaly: item.hasAnomaly,
+              link: `https://gall.dcinside.com/mgallery/board/view/?id=${item.galleryId}&no=${item.postNo}`
+            };
+          });
+        }
+      },
+      columns: [
+        { data: 'postNo' },
+        { data: 'galleryId' },
+        { data: 'subject' },
+        { data: 'author' },
+        { data: 'postDate' },
+        { data: 'recommendCount' },
+        { data: 'nonRecommendCount' },
+        { data: 'viewCount' },
+        { 
+          data: 'hasAnomaly',
+          render: function(data) {
+            return data ? 
+              '<span class="badge bg-danger"><i class="fas fa-exclamation-triangle me-1"></i>이상치 감지</span>' : 
+              '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>정상</span>';
+          }
+        },
+        { 
+          data: 'link',
+          render: function(data) {
+            return `<a href="${data}" target="_blank" class="btn btn-sm btn-outline-primary">링크</a>`;
+          }
+        }
+      ],
+      order: [[0, 'desc']],
+      pageLength: 10,
+      lengthMenu: [10, 25, 50],
+      language: {
+        url: 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/ko.json'
+      }
+    });
+    
+    // 갤러리 목록 로드
+    loadGalleryList();
+    
+    // 필터 적용 이벤트
+    $('#applyFilters').click(function() {
+      postsTable.ajax.reload();
+    });
+  });
+  
+  function loadGalleryList() {
+    $.get('/dashboard/api/stats', function(data) {
+      const gallerySelect = $('#galleryFilter');
+      gallerySelect.empty();
+      gallerySelect.append('<option value="">전체 갤러리</option>');
+      
+      // 중복 갤러리 ID 제거
+      const uniqueGalleries = new Set();
+      data.galleryStats.forEach(stat => uniqueGalleries.add(stat._id));
+      
+      // 갤러리 목록 추가
+      Array.from(uniqueGalleries).sort().forEach(function(galleryId) {
+        gallerySelect.append(`<option value="${galleryId}">${galleryId}</option>`);
+      });
+      
+      galleryList = Array.from(uniqueGalleries);
+    });
+  }
+</script>
+
+<%- include('./partials/footer') %>

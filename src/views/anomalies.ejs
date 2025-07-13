@@ -1,0 +1,168 @@
+<%- include('./partials/header') %>
+
+<div class="row">
+  <div class="col-lg-12 mb-4">
+    <div class="card shadow">
+      <div class="card-header bg-danger text-white">
+        <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>이상치 목록</h5>
+      </div>
+      <div class="card-body">
+        <div class="row mb-4">
+          <div class="col-md-4">
+            <div class="input-group">
+              <span class="input-group-text">갤러리</span>
+              <select class="form-select" id="galleryFilter">
+                <option value="">전체 갤러리</option>
+              </select>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="input-group">
+              <span class="input-group-text">최소 Z-Score</span>
+              <input type="number" class="form-control" id="minZScoreFilter" step="0.5" value="3">
+            </div>
+          </div>
+          <div class="col-md-4">
+            <button class="btn btn-primary w-100" id="applyFilters">필터 적용</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-bordered table-hover" id="anomaliesTable" width="100%">
+            <thead class="table-light">
+              <tr>
+                <th>감지 시간</th>
+                <th>갤러리</th>
+                <th>게시글 번호</th>
+                <th>제목</th>
+                <th>Z-Score</th>
+                <th>이전 추천수</th>
+                <th>현재 추천수</th>
+                <th>변화량</th>
+                <th>작성일</th>
+                <th>링크</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- DataTable이 채워줌 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let anomaliesTable;
+  let galleryList = [];
+  
+  document.addEventListener('DOMContentLoaded', function() {
+    // DataTable 초기화
+    anomaliesTable = $('#anomaliesTable').DataTable({
+      processing: true,
+      serverSide: true,
+      ajax: {
+        url: '/dashboard/api/anomalies/data',
+        data: function (d) {
+          return {
+            draw: d.draw,
+            page: d.start / d.length,
+            size: d.length,
+            sort: d.columns[d.order[0].column].data,
+            order: d.order[0].dir,
+            gallery: $('#galleryFilter').val(),
+            minZScore: $('#minZScoreFilter').val()
+          };
+        },
+        dataSrc: function (json) {
+            return json.data.map(function (item) {
+              const stats = item.statistics || {};
+              const before = stats.beforeRecommend || 0;
+              const after = stats.afterRecommend || 0;
+              return {
+                detectedAt: moment(item.detectedAt).format('YYYY-MM-DD HH:mm:ss'),
+                galleryId: item.galleryId,
+                postNo: item.postNo,
+                subject: item.post ? item.post.subject : '제목 없음',
+                zScore: stats.zScore != null ? stats.zScore.toFixed(2) : 'N/A',
+                previousCount: before,
+                currentCount: after,
+                change: after - before,
+                postDate: item.post ? moment(item.post.createdAt).format('YYYY-MM-DD') : 'N/A',
+                link: `https://gall.dcinside.com/mgallery/board/view/?id=${item.galleryId}&no=${item.postNo}`
+              };
+            });
+        }
+      },
+      columns: [
+        { data: 'detectedAt' },
+        { data: 'galleryId' },
+        { data: 'postNo' },
+        { data: 'subject' },
+        { 
+          data: 'zScore',
+          render: function(data) {
+            let cls = '';
+            const absValue = Math.abs(parseFloat(data) || 0);
+            
+            if (absValue >= 3.0) cls = 'text-danger fw-bold';
+            else if (absValue >= 2.0) cls = 'text-warning fw-bold';
+            else if (absValue >= 1.5) cls = 'text-primary';
+            
+            // 음수인 경우 (추천수 감소)
+            if (parseFloat(data) < 0) cls += ' fst-italic';
+            
+            return `<span class="${cls}">${data}</span>`;
+          }
+        },
+        { data: 'previousCount' },
+        { data: 'currentCount' },
+        { 
+          data: 'change',
+          render: function(data) {
+            const colorClass = data > 0 ? 'text-danger' : data < 0 ? 'text-success' : '';
+            return `<span class="${colorClass}">${data > 0 ? '+' + data : data}</span>`;
+          }
+        },
+        { data: 'postDate' },
+        { 
+          data: 'link',
+          render: function(data) {
+            return `<a href="${data}" target="_blank" class="btn btn-sm btn-outline-primary">링크</a>`;
+          }
+        }
+      ],
+      order: [[0, 'desc']],
+      pageLength: 10,
+      lengthMenu: [10, 25, 50],
+      language: {
+        url: 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/ko.json'
+      }
+    });
+    
+    // 갤러리 목록 로드
+    loadGalleryList();
+    
+    // 필터 적용 이벤트
+    $('#applyFilters').click(function() {
+      anomaliesTable.ajax.reload();
+    });
+  });
+  
+  function loadGalleryList() {
+    $.get('/dashboard/api/stats', function(data) {
+      const gallerySelect = $('#galleryFilter');
+      gallerySelect.empty();
+      gallerySelect.append('<option value="">전체 갤러리</option>');
+      
+      data.galleryStats.forEach(function(stat) {
+        gallerySelect.append(`<option value="${stat._id}">${stat._id} (${stat.count}건)</option>`);
+      });
+      
+      galleryList = data.galleryStats.map(stat => stat._id);
+    });
+  }
+</script>
+
+<%- include('./partials/footer') %>
