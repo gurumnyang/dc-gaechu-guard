@@ -267,6 +267,11 @@ $(document).ready(function() {
     order: [[8, 'desc']], // 버스트 수 기준 내림차순 정렬
     pageLength: 25,
     pagingType: 'full_numbers',
+    // DataTable 그려질 때마다 행 색상 적용
+    drawCallback: function() {
+      // 행 색상 적용 함수 호출
+      applyRowColors();
+    },
     language: {
       "emptyTable": "데이터가 없습니다",
       "info": "_START_ - _END_ / _TOTAL_",
@@ -286,12 +291,18 @@ $(document).ready(function() {
   
   // 새로고침 버튼
   $('.refresh-btn').click(function() {
-    table.ajax.reload();
+    table.ajax.reload(function() {
+      // AJAX 로드 완료 후 행 색상 적용
+      applyRowColors();
+    });
   });
   
   // 자동 새로고침 (1분마다)
   setInterval(function() {
-    table.ajax.reload(null, false);
+    table.ajax.reload(function() {
+      // AJAX 로드 완료 후 행 색상 적용
+      applyRowColors();
+    }, false);
   }, 60000);
   
   // 버스트 감지 필터링
@@ -334,8 +345,8 @@ $(document).ready(function() {
     table.draw();
   });
   
-  // 10초마다 행 색상 업데이트 (시각적 피드백)
-  setInterval(function() {
+  // 행 색상 적용 함수 정의
+  function applyRowColors() {
     $('#debugTable tbody tr').each(function() {
       $(this).removeClass('table-danger table-warning');
       
@@ -352,7 +363,10 @@ $(document).ready(function() {
         $(this).addClass('table-warning');
       }
     });
-  }, 10000);
+  }
+  
+  // 10초마다 행 색상 업데이트 (시각적 피드백)
+  setInterval(applyRowColors, 10000);
   
   // 서버 상태 확인
   function checkServerStatus() {
